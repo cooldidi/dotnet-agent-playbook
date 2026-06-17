@@ -20,7 +20,6 @@ var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT
 var chatClient = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential())
     .GetChatClient(deploymentName)
     .AsIChatClient();
-
 // 创建两个智能体：一个用于垃圾邮件检测，另一个用于邮件生成
 AIAgent spamDetectionAgent = GetSpamDetectionAgent(chatClient);
 AIAgent emailAssistantAgent = GetEmailAssistantAgent(chatClient);
