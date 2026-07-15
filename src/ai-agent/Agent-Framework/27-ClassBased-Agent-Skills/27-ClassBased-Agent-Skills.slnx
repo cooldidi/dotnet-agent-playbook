@@ -1,3 +1,5 @@
 <Solution>
+  <Project Path="27-ClassBased-Agent-Skills-AzureOpenAI/27-ClassBased-Agent-Skills-AzureOpenAI.csproj" />
+  <Project Path="27-ClassBased-Agent-Skills-Foundry/27-ClassBased-Agent-Skills-Foundry.csproj" />
   <Project Path="27-ClassBased-Agent-Skills/27-ClassBased-Agent-Skills.csproj" />
 </Solution>

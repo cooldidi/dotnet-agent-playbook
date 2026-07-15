@@ -9,7 +9,6 @@ using Azure.AI.OpenAI;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 using System.Text;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
@@ -21,36 +20,38 @@ Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
 
-
 #pragma warning disable MEAI001
+
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new AzureCliCredential())
     .GetChatClient(deploymentName)
-    .CreateAIAgent(new ChatClientAgentOptions
+    .AsIChatClient()
+    .AsAIAgent(new ChatClientAgentOptions
     {
         ChatOptions = new() { Instructions = "你是一位江湖说书人，擅长用幽默、接地气的方式讲笑话和故事。" },
         Name = "Joker",
-        ChatMessageStoreFactory = ctx => new InMemoryChatMessageStore(new MessageCountingChatReducer(2), ctx.SerializedState, ctx.JsonSerializerOptions)
+        ChatHistoryProvider = new InMemoryChatHistoryProvider(new() { ChatReducer = new MessageCountingChatReducer(2) })
     });
 #pragma warning restore MEAI001
 
-AgentThread thread = agent.GetNewThread();
+
+AgentSession agentSession = await agent.CreateSessionAsync();
 
 
-Console.WriteLine(await agent.RunAsync("给我讲一个发生在茶馆里的段子，轻松一点的那种。", thread));
+Console.WriteLine(await agent.RunAsync("给我讲一个发生在茶馆里的段子，轻松一点的那种。", agentSession));
 
-IList<ChatMessage>? chatHistory = thread.GetService<IList<ChatMessage>>();
+IList<ChatMessage>? chatHistory = agentSession.GetService<IList<ChatMessage>>();
 Console.WriteLine($"\n 聊天有 {chatHistory?.Count} 消息.\n");
 
 // Invoke the agent a few more times.
-Console.WriteLine(await agent.RunAsync("现在把这个段子加上一些表情符号，并用说书人的语气再讲一遍。", thread));
+Console.WriteLine(await agent.RunAsync("现在把这个段子加上一些表情符号，并用说书人的语气再讲一遍。", agentSession));
 Console.WriteLine($"\n 聊天有 {chatHistory?.Count} 消息.\n");
-Console.WriteLine(await agent.RunAsync("保持刚才的语气，讲一个关于健忘冒险者的轻松小故事，像是在讲笑话一样。", thread));
+Console.WriteLine(await agent.RunAsync("保持刚才的语气，讲一个关于健忘冒险者的轻松小故事，像是在讲笑话一样。", agentSession));
 Console.WriteLine($"\n 聊天有 {chatHistory?.Count} 消息.\n");
 
 // At this point, the chat history has exceeded the limit and the original message will not exist anymore,
 // so asking a follow up question about it will not work as expected.
-Console.WriteLine(await agent.RunAsync("接着刚才的氛围，讲一个发生在日常生活里的小乌龙事件，轻松随意一点。", thread));
+Console.WriteLine(await agent.RunAsync("接着刚才的氛围，讲一个发生在日常生活里的小乌龙事件，轻松随意一点。", agentSession));
 
 Console.WriteLine($"\n 聊天有 {chatHistory?.Count} 消息.\n");

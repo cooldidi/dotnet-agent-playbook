@@ -33,9 +33,10 @@ src/
 
 ## 如何阅读（推荐路径）
 
-1. `docs/ai-agent/Agent-Framework/`  
-2. `docs/ai-agent/Semantic-Kernel/`  
-3. 对照 `src/ai-agent/` 中对应目录运行示例
+1. 请参考公众号<<Pioneer AI>> 
+2. `docs/ai-agent/Agent-Framework/`  
+3. `docs/ai-agent/Semantic-Kernel/`  
+4. 对照 `src/ai-agent/` 中对应目录运行示例
 
 如果你只关心最新主线，请优先阅读 `docs/ai-agent/`，`_archive` 仅作历史参考。
 
@@ -43,21 +44,12 @@ src/
 
 - 文档在 `docs/ai-agent/*`，示例在 `src/ai-agent/*`
 - 优先按“篇号/主题”对应（同主题同编号）
-- 在 Agent Framework 中，已提供总索引：
-  - `docs/ai-agent/Agent-Framework/第99篇-Agent Framework 基础篇 - 32篇.md`
 
 ## 你可以从这里开始
 
-- Agent Framework 文档：`docs/ai-agent/Agent-Framework/`
-- Semantic Kernel 文档：`docs/ai-agent/Semantic-Kernel/`
+- 公众号文章系列：https://mp.weixin.qq.com/s/UEAd1TdxHJbN6uWCY2_Zbw
 - Agent Framework 示例：`src/ai-agent/Agent-Framework/`
-- Semantic Kernel 示例：`src/ai-agent/Semantic-Kernel/`
 
-## 更新策略
-
-- 主线内容只在 `ai-agent` 下持续迭代
-- 历史或不再维护内容移入 `_archive`
-- 新增内容优先遵循“文档 + 示例”成对提交
 
 ## 仓库地址
 

@@ -3,9 +3,9 @@
 // This sample shows how to use Image Multi-Modality with an AI agent.
 
 using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Extensions.AI;
-using OpenAI.Chat;
 using System.Text;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
@@ -13,31 +13,53 @@ Console.InputEncoding = Encoding.UTF8;
 Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = System.Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o";
+var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o";
 
-var agent = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential())
+
+
+// ============================================================
+// 方式一：通过 AzureOpenAIClient / ChatClient 创建 Agent
+// ============================================================
+var openAIAgent = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential())
     .GetChatClient(deploymentName)
-    .CreateAIAgent(
+    .AsIChatClient()
+    .AsAIAgent(
         name: "VisionAgent",
         instructions: "你是一个分析图片内容的智能代理，请根据图片内容回答用户的问题。");
-
-
-using HttpClient httpClient = new();
-httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-byte[] imageBytes = await httpClient.GetByteArrayAsync("https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg");
 
 // DataContent 表示二进制输入内容（如图片），具体类型名可能随 SDK 版本调整
 ChatMessage message = new(ChatRole.User, [
     new TextContent("你在这张图片中看到了什么？"),
-    new DataContent(imageBytes, "image/jpeg")
+    await DataContent.LoadFromAsync("Assets/walkway.jpg"),
 ]);
 
+var session = await openAIAgent.CreateSessionAsync();
 
-var thread = agent.GetNewThread();
+Console.WriteLine(await openAIAgent.RunAsync(message, session));
+//await foreach (var update in openAIAgent.RunStreamingAsync(message, session))
+//{
+//    Console.WriteLine(update);
+//}
 
-Console.WriteLine(await agent.RunAsync(message,thread));
 
-//await foreach (var update in agent.RunStreamingAsync(message, thread))
+// ============================================================
+// 方式二：通过 AIProjectClient 创建 Agent
+// ============================================================
+var foundryAgent = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
+    .AsAIAgent(
+        model: deploymentName,
+        instructions: "你是一个分析图片内容的智能代理，请根据图片内容回答用户的问题。",
+        name: "VisionAgent");
+
+ChatMessage message2 = new(ChatRole.User, [
+    new TextContent("你在这张图片中看到了什么？"),
+    await DataContent.LoadFromAsync("Assets/walkway.jpg"),
+]);
+var session2 = await foundryAgent.CreateSessionAsync();
+
+Console.WriteLine(await foundryAgent.RunAsync(message2, session2));
+
+//await foreach (var update in foundryAgent.RunStreamingAsync(message2, session2))
 //{
 //    Console.WriteLine(update);
 //}

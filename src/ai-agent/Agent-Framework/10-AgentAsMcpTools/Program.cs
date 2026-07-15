@@ -1,13 +1,14 @@
 ﻿// Copyright (c) Microsoft. All rights reserved.
 
 // This sample shows how to expose an AI agent as an MCP tool.
-
-using Azure.AI.Agents.Persistent;
+using Azure.AI.Projects;
+using Azure.AI.Projects.Agents;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ModelContextProtocol.Server;
+using System.Net;
 using System.Text;
 
 
@@ -17,21 +18,23 @@ using System.Text;
 Console.InputEncoding = Encoding.UTF8;
 Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
-var persistentAgentsClient = new PersistentAgentsClient("https://maf.services.ai.azure.com/api/projects/maf", new AzureCliCredential());
+var aiProjectClient = new AIProjectClient(new Uri("https://maf.services.ai.azure.com/api/projects/maf"), new DefaultAzureCredential());
+
 
 // 创建一个服务器端持久化代理。
-var agentMetadata = await persistentAgentsClient.Administration.CreateAgentAsync(
-    model: "gpt-4o",
-    instructions: "你是一位江湖说书人，擅长用幽默、接地气的方式讲笑话和故事。",
-    name: "Joker",
-    description: "我是一个擅长讲故事的江湖说书人。");
+ProjectsAgentVersion agentVersion = await aiProjectClient.AgentAdministrationClient.CreateAgentVersionAsync(
+    "Joker",
+    new ProjectsAgentVersionCreationOptions(
+        new DeclarativeAgentDefinition(model: "gpt-4o")
+        {
+            Instructions = "你是一位江湖说书人，擅长用幽默、接地气的方式讲笑话和故事。",
+        })
+    {
+        Description = "我是一个擅长讲故事的江湖说书人。"
+    });
 
-// Retrieve the server side persistent agent as an AIAgent.
-// 获取服务器端持久化代理
-AIAgent agent = await persistentAgentsClient.GetAIAgentAsync(agentMetadata.Value.Id);
+AIAgent agent = aiProjectClient.AsAIAgent(agentVersion);
 
-// 将代理转换为AIFunction，然后转换为MCP工具
-// 代理名称和描述将用作mcp工具名称和描述
 McpServerTool tool = McpServerTool.Create(agent.AsAIFunction());
 
 try
@@ -45,7 +48,7 @@ try
 
     await builder.Build().RunAsync();
 }
-catch(Exception ex) when (ex.InnerException != null)
+catch (Exception ex) when (ex.InnerException != null)
 {
-    Console.Error.WriteLine("initialize called",ex.Message);
+    Console.Error.WriteLine("initialize called", ex.Message);
 }

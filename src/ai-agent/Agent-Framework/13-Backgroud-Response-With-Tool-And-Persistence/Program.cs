@@ -4,14 +4,14 @@
 //// It shows polling for completion using continuation tokens, function calling during background operations,
 //// and persisting/restoring agent state between polling cycles.
 
-using System.ComponentModel;
-using System.Text;
-using System.Text.Json;
 using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using OpenAI.Responses;
+using System.ComponentModel;
+using System.Text;
+using System.Text.Json;
 
 Console.InputEncoding = Encoding.UTF8;
 Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
@@ -21,13 +21,16 @@ var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT
 
 var stateStore = new Dictionary<string, JsonElement?>();
 
-//ResponsesClient仅用于评估目的，未来更新中可能会更改或移除。若要继续，请忽略/抑制此诊断提示。
-#pragma warning disable OPENAI001 
+
+// ============================================================
+// 方式一：通过 AzureOpenAIClient / ChatClient 创建 Agent
+// ============================================================
 AIAgent agent = new AzureOpenAIClient(
     new Uri(endpoint),
     new AzureCliCredential())
-     .GetResponsesClient(deploymentName)
-     .CreateAIAgent(
+    .GetChatClient(deploymentName)
+    .AsIChatClient()
+    .AsAIAgent(
         name: "SpaceNovelWriter",
         instructions: @"你是一名太空题材小说作家。
 在写作之前，始终先研究相关的真实背景资料，并为主要角色生成角色设定。
@@ -36,50 +39,68 @@ AIAgent agent = new AzureOpenAIClient(
         tools: [AIFunctionFactory.Create(ResearchSpaceFactsAsync), AIFunctionFactory.Create(GenerateCharacterProfilesAsync)]);
 
 
+
+// ============================================================
+// 方式二：通过 AIProjectClient 创建 Agent
+// ============================================================
+
+//AIAgent foundryAgent = new AIProjectClient(
+//    new Uri(endpoint),
+//    new DefaultAzureCredential())
+//     .AsAIAgent(
+//        model: deploymentName,
+//        name: "SpaceNovelWriter",
+//        instructions: @"你是一名太空题材小说作家。
+//在写作之前，始终先研究相关的真实背景资料，并为主要角色生成角色设定。
+//写作时直接完成完整章节，不要请求批准或反馈。
+//不要向用户询问语气、风格、节奏或格式偏好——只需根据请求直接创作小说。",
+//        tools: [AIFunctionFactory.Create(ResearchSpaceFactsAsync), AIFunctionFactory.Create(GenerateCharacterProfilesAsync)]);
+
+
+// 启用后台响应（目前仅由 {Azure}OpenAI Responses 支持）。
 AgentRunOptions options = new()
 {
     AllowBackgroundResponses = true
 };
 
-AgentThread thread = agent.GetNewThread();
+AgentSession session = await agent.CreateSessionAsync();
 
-AgentRunResponse response = await agent.RunAsync("写一部篇幅非常长的小说，内容是关于一支宇航员团队探索一片未知星系的故事。", thread, options);
+AgentResponse response = await agent.RunAsync("写一部篇幅非常长的小说，内容是关于一支宇航员团队探索一片未知星系的故事。", session, options);
 
-// 循环直到后台完成
+#pragma warning disable MEAI001
 while (response.ContinuationToken is not null)
 {
-    PersistAgentState(thread, response.ContinuationToken);
+    await PersistAgentState(agent, session, response.ContinuationToken);
 
     await Task.Delay(TimeSpan.FromSeconds(10));
 
-#pragma warning disable MEAI001 
-    RestoreAgentState(agent, out thread, out ResponseContinuationToken? continuationToken);
-#pragma warning restore MEAI001 
+    var (restoredSession, continuationToken) = await RestoreAgentState(agent);
 
     options.ContinuationToken = continuationToken;
-    response = await agent.RunAsync(thread, options);
-}
-
-Console.WriteLine(response.Text);
-
-#pragma warning disable MEAI001 
-void PersistAgentState(AgentThread thread, ResponseContinuationToken? continuationToken)
-{
-    stateStore["thread"] = thread.Serialize();
-    stateStore["continuationToken"] = JsonSerializer.SerializeToElement(continuationToken, AgentAbstractionsJsonUtilities.DefaultOptions.GetTypeInfo(typeof(ResponseContinuationToken)));
+    response = await agent.RunAsync(restoredSession, options);
 }
 #pragma warning restore MEAI001
 
-#pragma warning disable MEAI001
-void RestoreAgentState(AIAgent agent, out AgentThread thread, out ResponseContinuationToken? continuationToken)
+Console.WriteLine(response.Text);
+
+async Task PersistAgentState(AIAgent agent, AgentSession? session, ResponseContinuationToken? continuationToken)
 {
-    JsonElement serializedThread = stateStore["thread"] ?? throw new InvalidOperationException("No serialized thread found in state store.");
+    stateStore["session"] = await agent.SerializeSessionAsync(session!);
+    stateStore["continuationToken"] = JsonSerializer.SerializeToElement(continuationToken, AgentAbstractionsJsonUtilities.DefaultOptions.GetTypeInfo(typeof(ResponseContinuationToken)));
+}
+
+async Task<(AgentSession Session, ResponseContinuationToken? ContinuationToken)> RestoreAgentState(AIAgent agent)
+{
+    JsonElement serializedSession = stateStore["session"] ?? throw new InvalidOperationException("No serialized session found in state store.");
     JsonElement? serializedToken = stateStore["continuationToken"];
 
-    thread = agent.DeserializeThread(serializedThread);
-    continuationToken = (ResponseContinuationToken?)serializedToken?.Deserialize(AgentAbstractionsJsonUtilities.DefaultOptions.GetTypeInfo(typeof(ResponseContinuationToken)));
+    AgentSession session = await agent.DeserializeSessionAsync(serializedSession);
+    ResponseContinuationToken? continuationToken = (ResponseContinuationToken?)serializedToken?.Deserialize(AgentAbstractionsJsonUtilities.DefaultOptions.GetTypeInfo(typeof(ResponseContinuationToken)));
+
+    return (session, continuationToken);
 }
-#pragma warning restore MEAI001 
+
+
 [Description("写一部非常长篇的小说，讲述一支宇航员团队探索一片尚未被发现的星系的故事。")]
 async Task<string> ResearchSpaceFactsAsync(string topic)
 {

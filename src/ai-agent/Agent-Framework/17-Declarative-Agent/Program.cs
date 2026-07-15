@@ -2,6 +2,7 @@
 
 // This sample shows how to create an agent from a YAML based declarative representation.
 
+using Azure.AI.Projects;
 using Azure.AI.OpenAI;
 using Azure.Identity;
 using Microsoft.Agents.AI;
@@ -15,13 +16,6 @@ Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false
 
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
-
-// Create the chat client
-IChatClient chatClient = new AzureOpenAIClient(
-    new Uri(endpoint),
-    new AzureCliCredential())
-     .GetChatClient(deploymentName)
-     .AsIChatClient();
 
 var text =
     """
@@ -44,15 +38,36 @@ var text =
                 required: true
                 description: 回答的文本内容。
     """;
+// ============================================================
+// 方式一：通过 AzureOpenAIClient / ChatClient 创建 Agent
+// ============================================================
+IChatClient openAIChatClient = new AzureOpenAIClient(
+    new Uri(endpoint),
+    new AzureCliCredential())
+     .GetChatClient(deploymentName)
+     .AsIChatClient();
 
-var agentFactory = new ChatClientPromptAgentFactory(chatClient);
-var agent = await agentFactory.CreateFromYamlAsync(text);
+var agentFactory = new ChatClientPromptAgentFactory(openAIChatClient);
+var openAIAgent = await agentFactory.CreateFromYamlAsync(text);
 
-Console.WriteLine(await agent!.RunAsync("用英语讲一个发生在茶馆里面的故事。"));
+Console.WriteLine(await openAIAgent!.RunAsync("用英语讲一个发生在茶馆里面的故事。"));
+Console.WriteLine(await openAIAgent!.RunAsync("用日语讲一个发生在茶馆里面的故事。"));
 
-await foreach (var update in agent!.RunStreamingAsync("用日语讲一个发生在茶馆里面的故事"))
-{
-    Console.WriteLine(update);
-}
 
+// ============================================================
+// 方式二：通过 AIProjectClient 创建 Agent
+// ============================================================
+#pragma warning disable OPENAI001
+AIProjectClient foundryAgent = new(new Uri(endpoint), new DefaultAzureCredential());
+IChatClient foundryChatClient = foundryAgent.GetProjectOpenAIClient().GetResponsesClient().AsIChatClient(deploymentName);
+
+var foundryAgentFactory = new ChatClientPromptAgentFactory(foundryChatClient);
+var foundryAgentInstance = await foundryAgentFactory.CreateFromYamlAsync(text);
+
+Console.WriteLine(await foundryAgentInstance!.RunAsync("用英语讲一个发生在茶馆里面的故事。"));
+Console.WriteLine(await foundryAgentInstance!.RunAsync("用日语讲一个发生在茶馆里面的故事。"));
+//await foreach (var update in foundryAgentInstance!.RunStreamingAsync("用日语讲一个发生在茶馆里面的故事"))
+//{
+//    Console.WriteLine(update);
+//}
 Console.ReadLine();

@@ -3,9 +3,12 @@
 // This sample shows how to create and use a simple AI agent with Azure OpenAI as the backend.
 
 using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using OpenAI;
+using OpenAI.Chat;
 using System.Text;
 
 
@@ -15,21 +18,32 @@ Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
 
-
-
-
 # region Azure CLI 认证
-//AIAgent agent = new AzureOpenAIClient(
-//    new Uri(endpoint),
-//    new AzureCliCredential()
-//    )
-//    .GetChatClient(deploymentName)
-//    .CreateAIAgent(instructions: "你是一个诗人", name: "Joker");
+// ============================================================
+// 方式一：通过 AzureOpenAIClient / ChatClient 创建 Agent
+// ============================================================
+AIAgent openAIAgent = new AzureOpenAIClient(
+    new Uri(endpoint),
+    new AzureCliCredential())
+    .GetChatClient(deploymentName)
+    .AsIChatClient()
+    .AsAIAgent(instructions: "你是一位江湖说书人，擅长用幽默、接地气的方式讲笑话和故事。", name: "Joker");
 
-//// Invoke the agent and output the text result.
-//Console.WriteLine(await agent.RunAsync("请帮我写一首诗。"));
+
+Console.WriteLine(string.Concat(Enumerable.Repeat('-', 120)));
+Console.WriteLine(await openAIAgent.RunAsync("给我讲一个发生在茶馆里的段子，轻松一点的那种。"));
+// ============================================================
+// 方式二：通过 AIProjectClient 创建 Agent
+// 关联包：Azure.Identity、Microsoft.Agents.AI.Foundry
+// ============================================================
+AIAgent foundryAgent = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
+    .AsAIAgent(model: deploymentName, instructions: "你是一位江湖说书人，擅长用幽默、接地气的方式讲笑话和故事。", name: "Joker");
+
+Console.WriteLine(string.Concat(Enumerable.Repeat('-', 120)));
+Console.WriteLine(await foundryAgent.RunAsync("给我讲一个发生在茶馆里的段子，轻松一点的那种。"));
 
 #endregion
+
 
 #region 使用服务主体 (Service Principal) 认证
 // 1. 定义 DefaultAzureCredential 的选项
@@ -67,17 +81,17 @@ var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT
 
 
 #region 使用 API 密钥认证
+//AIAgent agent = new AzureOpenAIClient(
+//    new Uri(endpoint),
+//    new System.ClientModel.ApiKeyCredential(""))
+//    .GetChatClient(deploymentName)
+//    .AsAIAgent(instructions: "你是一个诗人", name: "Joker");
+//    //.CreateAIAgent(instructions: "你是一个诗人", name: "Joker");已废弃
 
-AIAgent agent = new AzureOpenAIClient(
-    new Uri(endpoint),
-    new System.ClientModel.ApiKeyCredential(""))
-    .GetChatClient(deploymentName)
-    .CreateAIAgent(instructions: "你是一个诗人", name: "Joker");
+//// Invoke the agent and output the text result.
+//Console.WriteLine(await agent.RunAsync("请帮我写一首关于爱情的诗。"));
 
-// Invoke the agent and output the text result.
-Console.WriteLine(await agent.RunAsync("请帮我写一首关于爱情的诗。"));
-
-Console.ReadLine();
+//Console.ReadLine();
 #endregion
 
 // 流式方式返回结果

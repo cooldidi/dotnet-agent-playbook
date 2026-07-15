@@ -6,6 +6,7 @@
 // approval workflows for sensitive function calls.
 
 using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -30,18 +31,17 @@ static string GetWeather([Description("用于查询天气的地点.")] string lo
 [Description("当前的日期时间偏移量")]
 static string GetDateTime() => DateTimeOffset.Now.ToString();
 
-// 创建Azure OpenAI客户端并获取ChatCliet对象
-var azureOpenAIClient = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential())
-    .GetChatClient(deploymentName);
-
-// 构建 Agent 时注入底层中间件
-var originalAgent = azureOpenAIClient.AsIChatClient()
+// ============================================================
+// 方式一：通过 AzureOpenAIClient / ChatClient 创建 Agent
+// ============================================================
+var openAIAgent = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential())
+    .GetChatClient(deploymentName)
+    .AsIChatClient()
     .AsBuilder()
     .Use(getResponseFunc: ChatClientMiddleware, getStreamingResponseFunc: null)
     .BuildAIAgent(instructions: "你是一个帮助人们查找信息的 AI 助手。", tools: [AIFunctionFactory.Create(GetDateTime, name: nameof(GetDateTime))]);
 
-// 添加中间件在agent级别，并在其上构建一个新的代理
-var middlewareEnabledAgent = originalAgent
+var openAIMiddlewareEnabledAgent = openAIAgent
     .AsBuilder()
     .Use(FunctionCallMiddleware)
     .Use(FunctionCallOverrideWeather)
@@ -49,27 +49,73 @@ var middlewareEnabledAgent = originalAgent
     .Use(GuardrailMiddleware, null)
     .Build();
 
-var thread = middlewareEnabledAgent.GetNewThread();
+var openAISession = await openAIMiddlewareEnabledAgent.CreateSessionAsync();
 
 Console.WriteLine("\n\n=== 示例 1：措辞防护（Wording Guardrail） ===");
-var guardRailedResponse = await middlewareEnabledAgent.RunAsync("告诉我一些有害的内容。");
-Console.WriteLine($"防护后的响应：{guardRailedResponse}");
+var openAIGuardRailedResponse = await openAIMiddlewareEnabledAgent.RunAsync("告诉我一些有害的内容。", openAISession);
+Console.WriteLine($"防护后的响应：{openAIGuardRailedResponse}");
 
 
 Console.WriteLine("\n\n=== 示例 2：PII 检测（个人敏感信息） ===");
-var piiResponse = await middlewareEnabledAgent.RunAsync("我的名字是 John Doe，电话是 123-456-7890，邮箱是 john@something.com");
-Console.WriteLine($"PII 过滤后的响应：{piiResponse}");
-
+var openAIPiiResponse = await openAIMiddlewareEnabledAgent.RunAsync("我的名字是 John Doe，电话是 123-456-7890，邮箱是 john@something.com", openAISession);
+Console.WriteLine($"PII 过滤后的响应：{openAIPiiResponse}");
 
 Console.WriteLine("\n\n=== 示例 3：Agent 函数中间件 ===");
 
-var options = new ChatClientAgentRunOptions(new()
+var openAIOptions = new ChatClientAgentRunOptions(new()
 {
     Tools = [AIFunctionFactory.Create(GetWeather, name: nameof(GetWeather))]
 });
 
-var functionCallResponse = await middlewareEnabledAgent.RunAsync("西雅图现在几点了？天气怎么样？", thread, options);
+var functionCallResponse = await openAIMiddlewareEnabledAgent.RunAsync("西雅图现在几点了？天气怎么样？", openAISession, openAIOptions);
 Console.WriteLine($"函数调用响应: {functionCallResponse}");
+
+
+// ============================================================
+// 方式二：通过 AIProjectClient 创建 Agent
+// ============================================================
+AIAgent foundryAgent = new AIProjectClient(
+    new Uri(endpoint),
+    new DefaultAzureCredential())
+     .AsAIAgent(
+        model: deploymentName,
+        name: "SpaceNovelWriter",
+        instructions: "你是一个帮助人们查找信息的 AI 助手。",
+        tools: [AIFunctionFactory.Create(GetDateTime, name: nameof(GetDateTime))],
+         clientFactory: (chatClient) => chatClient
+        .AsBuilder()
+        .Use(getResponseFunc: ChatClientMiddleware, getStreamingResponseFunc: null)
+        .Build());
+
+var foundryMiddlewareEnabledAgent = foundryAgent
+    .AsBuilder()
+    .Use(FunctionCallMiddleware)
+    .Use(FunctionCallOverrideWeather)
+    .Use(PIIMiddleware, null)
+    .Use(GuardrailMiddleware, null)
+    .Build();
+
+var foundrySession = await foundryMiddlewareEnabledAgent.CreateSessionAsync();
+
+Console.WriteLine("\n\n=== 示例 1：措辞防护（Wording Guardrail） ===");
+var foundryGuardRailedResponse = await foundryMiddlewareEnabledAgent.RunAsync("告诉我一些有害的内容。", foundrySession);
+Console.WriteLine($"防护后的响应：{foundryGuardRailedResponse}");
+
+
+Console.WriteLine("\n\n=== 示例 2：PII 检测（个人敏感信息） ===");
+var foundryPiiResponse = await foundryMiddlewareEnabledAgent.RunAsync("我的名字是 John Doe，电话是 123-456-7890，邮箱是 john@something.com", foundrySession);
+Console.WriteLine($"PII 过滤后的响应：{foundryPiiResponse}");
+
+
+Console.WriteLine("\n\n=== 示例 3：Agent 函数中间件 ===");
+
+var foundryOptions = new ChatClientAgentRunOptions(new()
+{
+    Tools = [AIFunctionFactory.Create(GetWeather, name: nameof(GetWeather))]
+});
+
+var foundryFunctionCallResponse = await foundryMiddlewareEnabledAgent.RunAsync("西雅图现在几点了？天气怎么样？", foundrySession, foundryOptions);
+Console.WriteLine($"函数调用响应: {foundryFunctionCallResponse}");
 
 
 async Task<ChatResponse> ChatClientMiddleware(IEnumerable<ChatMessage> message, ChatOptions? options, IChatClient innerChatClient, CancellationToken cancellationToken)
@@ -104,12 +150,12 @@ async ValueTask<object?> FunctionCallOverrideWeather(AIAgent agent, FunctionInvo
 }
 
 
-async Task<AgentRunResponse> PIIMiddleware(IEnumerable<ChatMessage> messages, AgentThread? thread, AgentRunOptions? options, AIAgent innerAgent, CancellationToken cancellationToken)
+async Task<AgentResponse> PIIMiddleware(IEnumerable<ChatMessage> messages, AgentSession? session, AgentRunOptions? options, AIAgent innerAgent, CancellationToken cancellationToken)
 {
     var filteredMessages = FilterMessages(messages);
     Console.WriteLine("Pii 中间件 - 运行前过滤消息");
 
-    var response = await innerAgent.RunAsync(filteredMessages, thread, options, cancellationToken).ConfigureAwait(false);
+    var response = await innerAgent.RunAsync(filteredMessages, session, options, cancellationToken).ConfigureAwait(false);
 
     response.Messages = FilterMessages(response.Messages);
 
@@ -138,15 +184,14 @@ async Task<AgentRunResponse> PIIMiddleware(IEnumerable<ChatMessage> messages, Ag
         return content;
     }
 }
-
 // This middleware enforces guardrails by redacting certain keywords from input and output messages.
-async Task<AgentRunResponse> GuardrailMiddleware(IEnumerable<ChatMessage> messages, AgentThread? thread, AgentRunOptions? options, AIAgent innerAgent, CancellationToken cancellationToken)
+async Task<AgentResponse> GuardrailMiddleware(IEnumerable<ChatMessage> messages, AgentSession? session, AgentRunOptions? options, AIAgent innerAgent, CancellationToken cancellationToken)
 {
     var filteredMessages = FilterMessages(messages);
 
     Console.WriteLine("Guardrail 中间件 - 运行前过滤消息");
 
-    var response = await innerAgent.RunAsync(filteredMessages, thread, options, cancellationToken);
+    var response = await innerAgent.RunAsync(filteredMessages, session, options, cancellationToken);
 
     response.Messages = FilterMessages(response.Messages);
 
@@ -168,7 +213,6 @@ async Task<AgentRunResponse> GuardrailMiddleware(IEnumerable<ChatMessage> messag
                 return "[已屏蔽：包含禁止内容]";
             }
         }
-
         return content;
     }
 }

@@ -1,5 +1,6 @@
 ﻿
 using Azure.AI.OpenAI;
+using Azure.AI.Projects;
 using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -21,17 +22,37 @@ services.AddSingleton<AgentPlugin>();
 
 IServiceProvider serviceProvider = services.BuildServiceProvider();
 
-AIAgent agent = new AzureOpenAIClient(
+// ============================================================
+// 方式一：通过 AzureOpenAIClient / ChatClient 创建 Agent
+// ============================================================
+AIAgent openAIAgent = new AzureOpenAIClient(
     new Uri(endpoint),
     new AzureCliCredential())
     .GetChatClient(deploymentName)
-    .CreateAIAgent(
+    .AsIChatClient()
+    .AsAIAgent(
         instructions: "你是一个乐于助人的助手，帮助人们查找信息。",
         name: "Assistant",
         tools: [.. serviceProvider.GetRequiredService<AgentPlugin>().AsAITools()],
         services: serviceProvider);
 
-Console.WriteLine(await agent.RunAsync("告诉我西雅图的当前时间和天气。"));
+
+Console.WriteLine(await openAIAgent.RunAsync("告诉我西雅图的当前时间和天气。"));
+
+// ============================================================
+// 方式二：通过 AIProjectClient 创建 Agent
+// ============================================================
+AIAgent foundryAgent = new AIProjectClient(
+    new Uri(endpoint),
+    new DefaultAzureCredential())
+    .AsAIAgent(
+        model: deploymentName,
+        instructions: "你是一个乐于助人的助手，帮助人们查找信息。",
+        name: "Assistant",
+        tools: [.. serviceProvider.GetRequiredService<AgentPlugin>().AsAITools()],
+        services: serviceProvider); // Pass the service provider to the agent so it will be available to plugin functions to resolve dependencies.
+
+Console.WriteLine(await foundryAgent.RunAsync("告诉我西雅图的当前时间和天气。"));
 
 
 internal sealed class AgentPlugin(WeatherProvider weatherProvider)

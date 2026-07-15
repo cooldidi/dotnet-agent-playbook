@@ -25,7 +25,6 @@ Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false
 string endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
 string deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
-
 // --- Skills Provider ---
 // 从 'skills' 目录中发现技能，这些技能以 SKILL.md 文件的形式存在。
 // 脚本执行器会以本地子进程的方式运行基于文件的脚本（例如 Python）。
