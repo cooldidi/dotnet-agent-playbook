@@ -9,6 +9,8 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI;
 using OpenAI.Chat;
+using System.ClientModel;
+using System.ComponentModel;
 using System.Text;
 
 
@@ -16,86 +18,50 @@ Console.InputEncoding = Encoding.UTF8;
 Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
 var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
+var modelId = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
+var apiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_ApiKey") ?? throw new InvalidOperationException("AZURE_OPENAI_API_KEY is not set.");
 
-# region Azure CLI 认证
-// ============================================================
-// 方式一：通过 AzureOpenAIClient / ChatClient 创建 Agent
-// ============================================================
-AIAgent openAIAgent = new AzureOpenAIClient(
-    new Uri(endpoint),
-    new AzureCliCredential())
-    .GetChatClient(deploymentName)
-    .AsIChatClient()
-    .AsAIAgent(instructions: "你是一位江湖说书人，擅长用幽默、接地气的方式讲笑话和故事。", name: "Joker");
+#region Deepseek认证
+var openAiClient = new OpenAIClient(
+    new ApiKeyCredential(apiKey),
+    new OpenAIClientOptions
+    {
+        // 重要：Endpoint 设置为 DeepSeek API 的地址，末尾不加 /v1
+        Endpoint = new Uri(endpoint)
+    }
+);
+var chatClient = openAiClient.GetChatClient(modelId);
+AIAgent agent = chatClient.AsAIAgent(
+        instructions: "你是一位热情、知识渊博的旅行规划助手。当用户询问旅行建议时，你应当使用 'GetRandomDestination' 工具来随机选择一个目的地，然后为其规划一个简短的一日游行程。",
+        tools: [AIFunctionFactory.Create(GetRandomDestination)] // 将方法注册为工具
+    );
 
-
+// --- 4. 运行 Agent ---
+Console.WriteLine("正在与 DeepSeek Agent 对话...");
 Console.WriteLine(string.Concat(Enumerable.Repeat('-', 120)));
-Console.WriteLine(await openAIAgent.RunAsync("给我讲一个发生在茶馆里的段子，轻松一点的那种。"));
-// ============================================================
-// 方式二：通过 AIProjectClient 创建 Agent
-// 关联包：Azure.Identity、Microsoft.Agents.AI.Foundry
-// ============================================================
-AIAgent foundryAgent = new AIProjectClient(new Uri(endpoint), new DefaultAzureCredential())
-    .AsAIAgent(model: deploymentName, instructions: "你是一位江湖说书人，擅长用幽默、接地气的方式讲笑话和故事。", name: "Joker");
+Console.WriteLine("询问: " + "帮我规划一个一日游");
 
-Console.WriteLine(string.Concat(Enumerable.Repeat('-', 120)));
-Console.WriteLine(await foundryAgent.RunAsync("给我讲一个发生在茶馆里的段子，轻松一点的那种。"));
-
+// 使用 RunStreamingAsync 可以流式输出，提升体验 [citation:3]
+await foreach (var update in agent.RunStreamingAsync("帮我规划一个一日游"))
+{
+    Console.Write(update);
+}
+Console.WriteLine();
 #endregion
 
 
-#region 使用服务主体 (Service Principal) 认证
-// 1. 定义 DefaultAzureCredential 的选项
-//var options = new DefaultAzureCredentialOptions
-//{
-//    ExcludeEnvironmentCredential = true,     // 不用系统环境变量
-//    ExcludeManagedIdentityCredential = false, // 允许托管身份
-//    ExcludeAzureCliCredential = false,        // 允许 CLI 登录
-//    ExcludeVisualStudioCodeCredential = true
-//};
 
-//// 2. 手动定义一个服务主体凭证
-//var environmentCredential = new ClientSecretCredential(
-//    tenantId: "",
-//    clientId: "",
-//    clientSecret: ""
-//);
-
-//// 3. 创建凭证链（优先使用 environmentCredential）
-//var credentialChain = new ChainedTokenCredential(
-//    environmentCredential,
-//    new DefaultAzureCredential(options)
-//);
-// 4. 创建 AI Agent（注意这里指向OpenAI的URL地址，这个和CLI的认证是不一样的）
-//var agent = new AzureOpenAIClient(
-//    new Uri("https://maf.openai.azure.com/"),
-//    credentialChain)
-//    .GetChatClient(deploymentName)
-//    .CreateAIAgent(instructions: "你是一个诗人", name: "Joker");
-
-//Console.WriteLine(await agent.RunAsync("请帮我写一首诗。希望类型"));
-//Console.ReadLine();
-
-#endregion
-
-
-#region 使用 API 密钥认证
-//AIAgent agent = new AzureOpenAIClient(
-//    new Uri(endpoint),
-//    new System.ClientModel.ApiKeyCredential(""))
-//    .GetChatClient(deploymentName)
-//    .AsAIAgent(instructions: "你是一个诗人", name: "Joker");
-//    //.CreateAIAgent(instructions: "你是一个诗人", name: "Joker");已废弃
-
-//// Invoke the agent and output the text result.
-//Console.WriteLine(await agent.RunAsync("请帮我写一首关于爱情的诗。"));
-
-//Console.ReadLine();
-#endregion
-
-// 流式方式返回结果
-//await foreach (var update in agent.RunStreamingAsync("请帮我写一首诗。"))
-//{
-//    Console.WriteLine(update);
-//}
+// --- 2. 定义 Agent 可用的工具 (Tool) ---
+// 这里定义一个返回随机旅行目的地的工具
+// [Description] 属性帮助 AI 理解这个工具的用途，非常重要 [citation:3]
+[Description("提供一个随机的度假目的地。")]
+static string GetRandomDestination()
+{
+    var destinations = new[]
+    {
+        "巴黎, 法国", "东京, 日本", "纽约, 美国",
+        "悉尼, 澳大利亚", "罗马, 意大利", "巴塞罗那, 西班牙"
+    };
+    var random = new Random();
+    return destinations[random.Next(destinations.Length)];
+}
