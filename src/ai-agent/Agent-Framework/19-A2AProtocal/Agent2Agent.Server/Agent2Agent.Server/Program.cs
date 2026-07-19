@@ -15,34 +15,47 @@ using Azure.Identity;
 using Microsoft.Agents.AI;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.AI;
+using OpenAI;
 using OpenAI.Chat;
+using System.ClientModel;
 using System.Text;
 
 Console.InputEncoding = Encoding.UTF8;
 Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
-var endpoint =
-    Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")
-    ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
-
-var deploymentName =
-    Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME")
-    ?? "gpt-4o-mini";
-
+var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
+var modelId = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
+var apiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_ApiKey") ?? throw new InvalidOperationException("AZURE_OPENAI_API_KEY is not set.");
+var openAiClient = new OpenAIClient(
+    new ApiKeyCredential(apiKey),
+    new OpenAIClientOptions
+    {
+        // 重要：Endpoint 设置为 DeepSeek API 的地址，末尾不加 /v1
+        Endpoint = new Uri(endpoint)
+    }
+);
 // ================================
 // 1.创建本地 AI Agent
 // ================================
-AIAgent agent =
-    new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential())
-        .GetChatClient(deploymentName)
-        .AsAIAgent(
-            name: "Assistant",
-            instructions: """
+
+//AIAgent agent =
+//    new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential())
+//        .GetChatClient(deploymentName)
+//        .AsAIAgent(
+//            name: "Assistant",
+//            instructions: """
+//                你是一个通过 A2A 协议对外提供服务的 AI Agent。
+//                你需要清晰、简洁地回答问题。
+//                """
+//        );
+var chatClient = openAiClient.GetChatClient(modelId);
+AIAgent agent = chatClient.AsAIAgent(
+    name:"qdagent",
+        instructions: """
                 你是一个通过 A2A 协议对外提供服务的 AI Agent。
                 你需要清晰、简洁地回答问题。
-                """
-        );
-
+                """       
+    );
 // ================================
 // 2️.创建 ASP.NET Core Host
 // ================================
@@ -94,6 +107,7 @@ app.MapA2A(
     agent,
     path: "/",                        // Agent 执行入口
     agentCard: card,
+  
     taskManager =>
     {
         // .well-known/agent-card.json
@@ -103,6 +117,7 @@ app.MapA2A(
 
 app.Use(async (ctx, next) =>
 {
+    string ip = ctx.Connection.RemoteIpAddress?.ToString()??"";
     if (ctx.Request.Path.StartsWithSegments("/"))
     {
         Console.WriteLine("[Server] 收到 A2A HTTP 请求");

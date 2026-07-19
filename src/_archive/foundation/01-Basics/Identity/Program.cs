@@ -31,6 +31,7 @@ builder.Services.Configure<IdentityOptions>(options =>
     options.Password.RequiredLength = 8;
     options.Password.RequireLowercase = true;
     #endregion
+    
     #region 启用Email确认
     options.SignIn.RequireConfirmedEmail = true;
     #endregion

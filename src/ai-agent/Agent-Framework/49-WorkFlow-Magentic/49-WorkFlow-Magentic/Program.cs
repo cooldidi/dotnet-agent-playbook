@@ -1,165 +1,93 @@
-﻿// Copyright (c) Microsoft. All rights reserved.
+﻿using System.Text;
+using OpenAI;
+using System.ClientModel;
 
-// This sample ports the Python Magentic orchestration sample to .NET.
-// A Magentic workflow coordinates a researcher and a coder, streams orchestration
-// events as the plan evolves, and prints the final conversation transcript.
-
-using Azure.AI.OpenAI;
-using Azure.Identity;
-using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Workflows;
-using Microsoft.Agents.AI.Workflows.Specialized.Magentic;
-using Microsoft.Extensions.AI;
-using System.Text;
-
-const string TaskPrompt =
-   "我正在准备一份关于不同机器学习模型架构的能源效率的报告。 " +
-   "比较 ResNet-50、BERT-base 和 GPT-2 在标准数据集上的估计训练和推理能耗（例如，ResNet 使用 ImageNet，BERT 使用 GLUE，GPT-2 使用 WebText）。 " +
-   "然后，估算每个模型在 Azure Standard_NC6s_v3 虚拟机上训练 24 小时的 CO2 排放量。提供清晰的表格，并推荐每种任务类型（图像分类、文本分类和文本生成）最节能的模型。用中文输出";
-
-
+// 设置控制台编码
 Console.InputEncoding = Encoding.UTF8;
 Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-// 配置 Azure OpenAI 客户端。
-var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("未设置 AZURE_OPENAI_ENDPOINT。");
-var deploymentName = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-5.4-mini";
 
+// 读取配置
+var endpoint = Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? throw new InvalidOperationException("AZURE_OPENAI_ENDPOINT is not set.");
+var modelId = Environment.GetEnvironmentVariable("AZURE_OPENAI_DEPLOYMENT_NAME") ?? "gpt-4o-mini";
+var apiKey = Environment.GetEnvironmentVariable("AZURE_OPENAI_ApiKey") ?? throw new InvalidOperationException("AZURE_OPENAI_API_KEY is not set.");
 
-var client = new AzureOpenAIClient(new Uri(endpoint), new AzureCliCredential()).GetChatClient(deploymentName).AsIChatClient();
-
-var researcherAgent = new ChatClientAgent(client, "你专注于研究和信息收集", "ResearcherAgent", "专注于研究和信息收集的专家。");
-
-var coderAgent = new ChatClientAgent(client, "你解决定量问题，通过编写和运行代码。清楚地展示分析和计算过程", "CoderAgent", "一个能够编写并执行代码以分析数据的得力助手。", tools: [new HostedCodeInterpreterTool()]);
-
-var managerAgent = new ChatClientAgent(client, "你协调团队以高效完成复杂任务", "MagenticManager", "协调研究员和编码器的工作流程的组织者。");
-
-var translatorAgent = new ChatClientAgent(client, "你将研究员和编码器的对话翻译成中文，如果没有传入任何数据的时候不要返回任何值", "TranslatorAgent", "将研究员和编码器的对话翻译成中文的翻译者。");
-
-
-Workflow workflow = new MagenticWorkflowBuilder(managerAgent)
-    .AddParticipants([researcherAgent, coderAgent])
-    .WithName("Magentic 协作流程")
-    .WithDescription("协作协调研究员和编码器以解决复杂分析任务。")
-    .RequirePlanSignoff(false)
-    .WithMaxRounds(10)
-    .WithMaxStalls(3)
-    .WithMaxResets(2)
-    .Build();
-
-Console.WriteLine("构建 Magentic 工作流...");
-Console.WriteLine();
-Console.WriteLine($"任务: {TaskPrompt}");
-Console.WriteLine();
-Console.WriteLine("开始执行工作流...");
-
-await using StreamingRun run = await InProcessExecution.RunStreamingAsync(
-    workflow,
-    new List<ChatMessage> { new(ChatRole.User, TaskPrompt) });
-
-await run.TrySendMessageAsync(new TurnToken(emitEvents: true));
-
-string? lastResponseId = null;
-WorkflowOutputEvent? finalOutput = null;
-
-await foreach (WorkflowEvent workflowEvent in run.WatchStreamAsync())
-{
-    switch (workflowEvent)
+// 创建OpenAI客户端
+var openAiClient = new OpenAIClient(
+    new ApiKeyCredential(apiKey),
+    new OpenAIClientOptions
     {
-        case AgentResponseUpdateEvent updateEvent:
-            WriteStreamingUpdate(updateEvent, ref lastResponseId);
-            break;
-
-        case MagenticPlanCreatedEvent planCreated:
-            WriteMagenticMessage("初始计划", planCreated.FullTaskLedger.Text, translatorAgent);
-            PauseIfInteractive();
-            break;
-
-        case MagenticReplannedEvent replanned:
-            WriteMagenticMessage("重新计划", replanned.FullTaskLedger.Text, translatorAgent);
-            PauseIfInteractive();
-            break;
-
-        case MagenticProgressLedgerUpdatedEvent progressUpdated:
-            WriteMagenticMessage("进度账本", FormatProgressLedger(progressUpdated.ProgressLedger), translatorAgent);
-            PauseIfInteractive();
-            break;
-
-        case WorkflowOutputEvent outputEvent when outputEvent.Is<List<ChatMessage>>():
-            finalOutput = outputEvent;
-            break;
-
-        case WorkflowErrorEvent workflowError:
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.Error.WriteLine(workflowError.Exception?.ToString() ?? "未知的工作流错误发生。");
-            Console.ResetColor();
-            break;
-
-        case ExecutorFailedEvent executorFailed:
-            Console.ForegroundColor = ConsoleColor.Red;
-            Console.Error.WriteLine($"执行器 '{executorFailed.ExecutorId}' 失败，原因: {(executorFailed.Data is null ? "未知错误" : $"异常 {executorFailed.Data}")}.");
-            Console.ResetColor();
-            break;
+        Endpoint = new Uri(endpoint)
     }
-}
+);
 
-if (finalOutput?.As<List<ChatMessage>>() is { } transcript)
+// 主菜单
+while (true)
 {
+    Console.Clear();
+    Console.WriteLine("=".PadRight(60, '='));
+    Console.WriteLine("Magentic 工作流示例");
+    Console.WriteLine("=".PadRight(60, '='));
     Console.WriteLine();
-    Console.WriteLine(new string('=', 80));
+    Console.WriteLine("请选择要运行的样例:");
+    Console.WriteLine("  1. 能源效率报告 (Magentic 协作流程)");
+    Console.WriteLine("  2. API性能分析");
+    Console.WriteLine("  3. 全部运行 (先1后2)");
+    Console.WriteLine("  0. 退出");
     Console.WriteLine();
-    Console.WriteLine("最终对话记录:");
+    Console.Write("请输入选择 (0-3): ");
+
+    var choice = Console.ReadLine();
     Console.WriteLine();
 
-    foreach (ChatMessage message in transcript)
+    try
     {
-        Console.WriteLine($"{message.AuthorName ?? message.Role.ToString()}: {message.Text}");
-        Console.WriteLine();
-    }
-}
-static void WriteStreamingUpdate(AgentResponseUpdateEvent updateEvent, ref string? lastResponseId)
-{
-    string responseId = updateEvent.Update.ResponseId ?? updateEvent.Update.MessageId ?? updateEvent.ExecutorId;
-    if (!string.Equals(responseId, lastResponseId, StringComparison.Ordinal))
-    {
-        if (lastResponseId is not null)
+        switch (choice)
         {
-            Console.WriteLine();
-            Console.WriteLine();
+            case "1":
+                var sample1 = new Sample1_EnergyReport(openAiClient, modelId);
+                await sample1.RunAsync();
+                break;
+
+            case "2":
+                var sample2 = new Sample2_PerformanceAnalysis(openAiClient, modelId);
+                await sample2.RunAsync();
+                break;
+
+            case "3":
+                var s1 = new Sample1_EnergyReport(openAiClient, modelId);
+                await s1.RunAsync();
+
+                Console.WriteLine();
+                Console.WriteLine(new string('=', 100));
+                Console.WriteLine("按回车键继续运行样例二...");
+                Console.ReadLine();
+                Console.WriteLine();
+
+                var s2 = new Sample2_PerformanceAnalysis(openAiClient, modelId);
+                await s2.RunAsync();
+                break;
+
+            case "0":
+                Console.WriteLine("退出程序");
+                return;
+
+            default:
+                Console.WriteLine("无效选择，请重新输入");
+                break;
         }
-
-        Console.Write($"- {updateEvent.ExecutorId}: ");
-        lastResponseId = responseId;
     }
-
-    if (!string.IsNullOrEmpty(updateEvent.Update.Text))
+    catch (Exception ex)
     {
-        Console.Write(updateEvent.Update.Text);
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"执行失败: {ex.Message}");
+        if (ex.InnerException != null)
+        {
+            Console.WriteLine($"内部错误: {ex.InnerException.Message}");
+        }
+        Console.ResetColor();
     }
-}
 
-static void WriteMagenticMessage(string title, string? content, ChatClientAgent translatorAgent)
-{
     Console.WriteLine();
-    Console.WriteLine($"[Magentic {title}]");
-    Console.WriteLine(translatorAgent.RunAsync(new ChatMessage(ChatRole.User, content)).Result.Text);
-}
-
-static string FormatProgressLedger(MagenticProgressLedger ledger) =>
-   string.Join(Environment.NewLine,
-       $"请求满足: {ledger.IsRequestSatisfied}",
-       $"循环中: {ledger.IsInLoop}",
-       $"正在取得进展: {ledger.IsProgressBeingMade}",
-       $"下一个发言者: {ledger.NextSpeaker}",
-       $"指令: {ledger.InstructionOrQuestion}");
-
-static void PauseIfInteractive()
-{
-    if (Console.IsInputRedirected || Console.IsOutputRedirected)
-    {
-        return;
-    }
-
-    Console.Write("按回车键继续...");
+    Console.WriteLine("按回车键返回主菜单...");
     Console.ReadLine();
-    Console.WriteLine();
 }
